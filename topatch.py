@@ -124,7 +124,7 @@ if __name__ == "__main__":
     #               prefix='naivevmat1', ftr=-10, zrescale=None)
 
     tif_to_patches([npy0],
-                   destination=['filopodia_patches/'],
+                   destination=['filopodia_patches_9_R/'],
                    dh=(64, 256, 256), step=(64, 256, 256), permute=None,
                    trd=(None, None), norm=('11', '11'),
                    prefix='', ftr=-10, zrescale=None, 
