@@ -22,5 +22,9 @@
     "aisr": {
         "LOGS": "/media/ExtHDD01/logs/",
         "DATASET": "/media/ghc/Ghc_data3/BRC/aisr/"
+    },
+    "test": {
+        "LOGS": "/home/catherine/Lab/FLY/IsoScopeXX/media/logs/",
+        "DATASET": "/home/catherine/Lab/FLY/IsoScopeXX/media/"
     }
 }

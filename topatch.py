@@ -112,9 +112,9 @@ def z_rescale(xx, trd=6):
 
 
 if __name__ == "__main__":
-    root = '/media/aero/HDD01/CharlieChang/Data/filopodia/'
+    root = '/home/catherine/Lab/FLY/IsoScopeXX/media/filopodia/'
     suffix = ''
-    npy0 = tiff.imread(root + '10X_G0431;6xGFP_incubator_10xSp_4d_Ch-GFP_G-ch-bio_SA635_1_Stitch.tif')
+    npy0 = tiff.imread(root + '10X_G0431_6xGFP_incubator_10xSp_4d_Ch-GFP_G-ch-b_SA635_9_R.tif')
     #npy1 = tiff.imread(root + 'dist0.tif')
 
     #tif_to_patches([npy0, npy1],

@@ -219,8 +219,7 @@ class GAN(BaseModel):
                 z_init = 0  # Deterministic for validation
                 # print(f"[DEBUG] generation cropz: deterministic=True, z_init={z_init}")
             else:
-                z_range = batch['img'][0].shape[4] - self.hparams.cropz
-                z_init = np.random.randint(z_range) if z_range > 0 else 0
+                z_init = np.random.randint(batch['img'][0].shape[4] - self.hparams.cropz)
                 # print(f"[DEBUG] generation cropz: deterministic=False, z_init={z_init}")
             for b in range(len(batch['img'])):
                 batch['img'][b] = batch['img'][b][:, :, :, :, z_init:z_init + self.hparams.cropz]
