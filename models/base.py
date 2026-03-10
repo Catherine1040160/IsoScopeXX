@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional, Union, Any
 
+import os
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,11 +10,13 @@ import yaml
 import torchvision.models as models
 import torchvision.transforms as transforms
 
+from pytorch_lightning.loggers import MLFlowLogger
 from networks.networks import get_scheduler
 from networks.loss import GANLoss
 from networks.registry import network_registry
 from utils.data_utils import *
 import tifffile as tiff
+from PIL import Image
 
 
 def _weights_init(m: nn.Module) -> None:
@@ -113,6 +117,8 @@ class BaseModel(pl.LightningModule):
         self.log_image = {}
 
         self.buffer = {}
+        self._epoch_time_sum = 0.0
+        self._epoch_count = 0
 
     def _init_loss_functions(self) -> None:
         """Initialize loss functions used in the model.
@@ -124,8 +130,80 @@ class BaseModel(pl.LightningModule):
         else:
             self.criterionGAN = GANLoss(self.hparams.gan_mode)
 
-    #def update_optimizer_scheduler(self):
-    #    [self.optimizer_d, self.optimizer_g], [] = self.configure_optimizers()
+    def _get_mlflow_client_and_run_id(self):
+        """Gets the MLflow client and run ID for artifact/metric logging.
+
+        Only returns valid references on rank 0 to avoid duplicate logging in DDP.
+
+        Returns:
+            Tuple of (MlflowClient, run_id), or (None, None) if unavailable.
+        """
+        if not hasattr(self, 'trainer') or self.trainer is None:
+            return None, None
+        if not self.trainer.is_global_zero:
+            return None, None
+        for logger in self.loggers:
+            if isinstance(logger, MLFlowLogger):
+                client = logger.experiment
+                run_id = logger.run_id
+                if client is not None and run_id is not None:
+                    return client, run_id
+        return None, None
+
+    @staticmethod
+    def _numpy_to_preview(arr, scale=2):
+        """Converts a 2D numpy array to a normalized, upscaled PIL Image.
+
+        Args:
+            arr: 2D numpy array to convert.
+            scale: Upscale factor using nearest-neighbor interpolation.
+
+        Returns:
+            PIL Image with pixel values in [0, 255].
+        """
+        arr = arr.astype(np.float32)
+        mn, mx = arr.min(), arr.max()
+        if mx - mn > 1e-8:
+            arr = (arr - mn) / (mx - mn)
+        else:
+            arr = np.zeros_like(arr)
+        img = (arr * 255).astype(np.uint8)
+        pil = Image.fromarray(img)
+        if scale != 1:
+            pil = pil.resize((pil.width * scale, pil.height * scale), Image.NEAREST)
+        return pil
+
+    def _log_preview_artifact(self, arr, prefix):
+        """Saves a 2D/3D array as PNG preview and logs to MLflow."""
+        client, run_id = self._get_mlflow_client_and_run_id()
+        if client is None:
+            return
+        preview = self._numpy_to_preview(
+            arr[arr.shape[0] // 2, :, :] if arr.ndim == 3 else arr
+        )
+        png_path = os.path.join(self.dir_checkpoints, f'{prefix}_epoch_{self.epoch}.png')
+        preview.save(png_path)
+        client.log_artifact(run_id, png_path, artifact_path="images")
+
+    def on_fit_start(self):
+        """Initializes output directories and logs config files to MLflow artifacts."""
+        os.makedirs('out', exist_ok=True)
+        client, run_id = self._get_mlflow_client_and_run_id()
+        if client is None:
+            return
+
+        yaml_name = getattr(self.hparams, 'yaml', None)
+        if yaml_name:
+            yaml_path = os.path.join(os.getcwd(), 'env', yaml_name + '.yaml')
+            if os.path.exists(yaml_path):
+                client.log_artifact(run_id, yaml_path, artifact_path="configs")
+
+        logs_base = os.environ.get('LOGS', '')
+        dataset = getattr(self.hparams, 'dataset', '')
+        prj = getattr(self.hparams, 'prj', '')
+        json_path = os.path.join(logs_base, dataset, prj, '0.json')
+        if os.path.exists(json_path):
+            client.log_artifact(run_id, json_path, artifact_path="configs")
 
     def save_tensor_to_png(self, tensor, path):
         # Ensure the tensor is on CPU
@@ -228,7 +306,22 @@ class BaseModel(pl.LightningModule):
             else:
                 return None
 
+    def on_train_epoch_start(self):
+        """Records epoch start time for duration tracking."""
+        self._epoch_start_time = time.time()
+
     def training_epoch_end(self, outputs):
+        if hasattr(self, '_epoch_start_time'):
+            epoch_duration = time.time() - self._epoch_start_time
+            self._epoch_time_sum += epoch_duration
+            self._epoch_count += 1
+            avg = self._epoch_time_sum / self._epoch_count
+            if self.trainer.is_global_zero:
+                print(f'Epoch {self.epoch} | {epoch_duration//60:.0f}m {epoch_duration%60:.1f}s (avg: {avg//60:.0f}m {avg%60:.1f}s)')
+            client, run_id = self._get_mlflow_client_and_run_id()
+            if client is not None:
+                client.log_metric(run_id, 'epoch_time', epoch_duration, step=self.epoch)
+
         # checkpoint
         if self.epoch % self.hparams.epoch_save == 0:
             for name in self.netg_names.keys():
@@ -251,12 +344,14 @@ class BaseModel(pl.LightningModule):
 
         self.reset_metrics()
 
-        if self.epoch % 20 == 0 and hasattr(self, 'train_Xup') and hasattr(self, 'train_XupX'):
-            #  # (B, C, X, Y, Z) - Use stored training data (not validation data)
+        if self.epoch % 20 == 0 and hasattr(self, 'train_Xup') and hasattr(self, 'train_XupX') and self.trainer.is_global_zero:
             print_ori = np.concatenate([self.train_Xup[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_XupX.shape[1])], 1)
             print_enc = np.concatenate([self.train_XupX[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_Xup.shape[1])], 1)
-            tiff.imwrite('out/epoch_{}.tif'.format(self.epoch),
-                         np.concatenate([print_ori, print_enc], 2))
+            concat_arr = np.concatenate([print_ori, print_enc], 2)
+            tiff.imwrite('out/epoch_{}.tif'.format(self.epoch), concat_arr)
+
+            if self.eval_loader is None:
+                self._log_preview_artifact(concat_arr, 'train')
 
         self.epoch += 1
 

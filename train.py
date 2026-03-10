@@ -19,7 +19,7 @@ os.environ['OPENBLAS_NUM_THREADS'] = '1'
 
 def prepare_log(args):
     """
-    finalize arguments, creat a folder for logging, save argument in json
+    finalize arguments, create a folder for logging, save argument in json
     """
     args.not_tracking_hparams = ['mode', 'port', 'host', 'preload', 'test_batch_size', 'not_tracking_hparams']
     os.makedirs(os.environ.get('LOGS') + args.dataset + '/', exist_ok=True)
@@ -106,20 +106,17 @@ if __name__ == '__main__':
                 pass
         print('Preloading time: ' + str(time.time() - tini))
 
-    # Logger - Both TensorBoard and MLflow with timestamp versioning
     log_base = os.path.join(os.environ.get('LOGS'), args.dataset, args.prj, 'logs')
-
-    # Create unique timestamp for this run (links everything together)
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     tb_logger = TensorBoardLogger(
         save_dir=log_base,
         name='TensorBoardLogger',
-        version=run_timestamp  # Use timestamp as version
+        version=run_timestamp
     )
     mlf_logger = MLFlowLogger(
-        experiment_name=args.dataset,
-        run_name=f"{args.prj}_{run_timestamp}",  # Include timestamp in run name
+        experiment_name=f"{args.dataset}_{args.env}",
+        run_name=f"{args.prj}_{run_timestamp}",
         tracking_uri=f"file:{os.path.join(log_base, 'MLFlowLogger')}",
         tags={
             'env': args.env,
@@ -130,16 +127,14 @@ if __name__ == '__main__':
         }
     )
 
-    # Checkpoints - linked to same timestamp
     checkpoints = os.path.join(os.environ.get('LOGS'), args.dataset, args.prj, 'checkpoints', run_timestamp)
     os.makedirs(checkpoints, exist_ok=True)
 
     net = GAN(hparams=args, train_loader=train_loader, eval_loader=eval_loader, checkpoints=checkpoints)
 
-    "Please use `Trainer(accelerator='gpu', devices=-1)` instead."
     trainer = pl.Trainer(gpus=-1, strategy='ddp_spawn',
-                         max_epochs=args.n_epochs,  # progress_bar_refresh_rate=20,
-                         logger=[tb_logger, mlf_logger],  # Both TensorBoard and MLflow
+                         max_epochs=args.n_epochs,
+                         logger=[tb_logger, mlf_logger],
                          enable_checkpointing=True, log_every_n_steps=100,
                          check_val_every_n_epoch=1, accumulate_grad_batches=2)
     if eval_loader is not None:
