@@ -96,9 +96,10 @@ class BaseModel(pl.LightningModule):
         self.loss_d_names = ['loss_d']
 
         # Process hyperparameters
-        hparams_dict = {x: vars(hparams)[x] for x in vars(hparams).keys() 
-                       if x not in hparams.not_tracking_hparams}
-        hparams_dict.pop('not_tracking_hparams', None)
+        hparams_dict = vars(hparams).copy()
+        for k in hparams.not_tracking_hparams:
+            hparams_dict.pop(k, None)
+        hparams_dict.pop("not_tracking_hparams", None)
         self.hparams.update(hparams_dict)
         self.save_hyperparameters(self.hparams)
 
@@ -345,6 +346,7 @@ class BaseModel(pl.LightningModule):
         self.reset_metrics()
 
         if self.epoch % 20 == 0 and hasattr(self, 'train_Xup') and hasattr(self, 'train_XupX') and self.trainer.is_global_zero:
+            # (B, C, X, Y, Z) - Use stored training data (not validation data)
             print_ori = np.concatenate([self.train_Xup[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_XupX.shape[1])], 1)
             print_enc = np.concatenate([self.train_XupX[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_Xup.shape[1])], 1)
             concat_arr = np.concatenate([print_ori, print_enc], 2)

@@ -21,7 +21,7 @@ def prepare_log(args):
     """
     finalize arguments, create a folder for logging, save argument in json
     """
-    args.not_tracking_hparams = ['mode', 'port', 'host', 'preload', 'test_batch_size', 'not_tracking_hparams']
+    args.not_tracking_hparams = ['mode', 'port', 'host', 'preload', 'test_batch_size']
     os.makedirs(os.environ.get('LOGS') + args.dataset + '/', exist_ok=True)
     os.makedirs(os.environ.get('LOGS') + args.dataset + '/' + args.prj + '/', exist_ok=True)
     save_json(args, os.environ.get('LOGS') + args.dataset + '/' + args.prj + '/' + '0.json')
@@ -67,13 +67,15 @@ if __name__ == '__main__':
 
     # Finalize Arguments and create files for logging
     args.bash = ' '.join(sys.argv)
-    try:
-        args.git_hash = subprocess.check_output(
-            ['git', 'rev-parse', '--short', 'HEAD'],
-            stderr=subprocess.DEVNULL
-        ).decode('ascii').strip()
-    except Exception:
-        args.git_hash = 'unknown'
+
+    def get_git_hash():
+        try:
+            return subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"]
+            ).decode().strip()
+        except:
+            return "unknown"
+    args.git_hash = get_git_hash()
     args = prepare_log(args)
     print(args)
 
@@ -132,8 +134,9 @@ if __name__ == '__main__':
 
     net = GAN(hparams=args, train_loader=train_loader, eval_loader=eval_loader, checkpoints=checkpoints)
 
+    "Please use `Trainer(accelerator='gpu', devices=-1)` instead."
     trainer = pl.Trainer(gpus=-1, strategy='ddp_spawn',
-                         max_epochs=args.n_epochs,
+                         max_epochs=args.n_epochs, # progress_bar_refresh_rate=20
                          logger=[tb_logger, mlf_logger],
                          enable_checkpointing=True, log_every_n_steps=100,
                          check_val_every_n_epoch=1, accumulate_grad_batches=2)
