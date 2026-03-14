@@ -17,6 +17,7 @@ pytorch-msssim
 pyyaml
 scikit-image
 scipy
+setuptools==59.5.0
 tensorboard
 tifffile
 tqdm
