@@ -407,8 +407,6 @@ class GAN(BaseModel):
                                             for c in range(self.Xup.shape[1])], 1)
                 val_concat = np.concatenate([print_ori, print_enc], 2)
                 tiff.imwrite('out/val_epoch_{}.tif'.format(self.epoch), val_concat)
-
-                self._log_preview_artifact(val_concat, 'val')
         return None
     
     def configure_optimizers(self):

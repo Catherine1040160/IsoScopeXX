@@ -16,7 +16,6 @@ from networks.loss import GANLoss
 from networks.registry import network_registry
 from utils.data_utils import *
 import tifffile as tiff
-from PIL import Image
 
 
 def _weights_init(m: nn.Module) -> None:
@@ -150,61 +149,6 @@ class BaseModel(pl.LightningModule):
                 if client is not None and run_id is not None:
                     return client, run_id
         return None, None
-
-    @staticmethod
-    def _numpy_to_preview(arr, scale=2):
-        """Converts a 2D numpy array to a normalized, upscaled PIL Image.
-
-        Args:
-            arr: 2D numpy array to convert.
-            scale: Upscale factor using nearest-neighbor interpolation.
-
-        Returns:
-            PIL Image with pixel values in [0, 255].
-        """
-        arr = arr.astype(np.float32)
-        mn, mx = arr.min(), arr.max()
-        if mx - mn > 1e-8:
-            arr = (arr - mn) / (mx - mn)
-        else:
-            arr = np.zeros_like(arr)
-        img = (arr * 255).astype(np.uint8)
-        pil = Image.fromarray(img)
-        if scale != 1:
-            pil = pil.resize((pil.width * scale, pil.height * scale), Image.NEAREST)
-        return pil
-
-    def _log_preview_artifact(self, arr, prefix):
-        """Saves a 2D/3D array as PNG preview and logs to MLflow."""
-        client, run_id = self._get_mlflow_client_and_run_id()
-        if client is None:
-            return
-        preview = self._numpy_to_preview(
-            arr[arr.shape[0] // 2, :, :] if arr.ndim == 3 else arr
-        )
-        png_path = os.path.join(self.dir_checkpoints, f'{prefix}_epoch_{self.epoch}.png')
-        preview.save(png_path)
-        client.log_artifact(run_id, png_path, artifact_path="images")
-
-    def on_fit_start(self):
-        """Initializes output directories and logs config files to MLflow artifacts."""
-        os.makedirs('out', exist_ok=True)
-        client, run_id = self._get_mlflow_client_and_run_id()
-        if client is None:
-            return
-
-        yaml_name = getattr(self.hparams, 'yaml', None)
-        if yaml_name:
-            yaml_path = os.path.join(os.getcwd(), 'env', yaml_name + '.yaml')
-            if os.path.exists(yaml_path):
-                client.log_artifact(run_id, yaml_path, artifact_path="configs")
-
-        logs_base = os.environ.get('LOGS', '')
-        dataset = getattr(self.hparams, 'dataset', '')
-        prj = getattr(self.hparams, 'prj', '')
-        json_path = os.path.join(logs_base, dataset, prj, '0.json')
-        if os.path.exists(json_path):
-            client.log_artifact(run_id, json_path, artifact_path="configs")
 
     def save_tensor_to_png(self, tensor, path):
         # Ensure the tensor is on CPU
@@ -351,9 +295,6 @@ class BaseModel(pl.LightningModule):
             print_enc = np.concatenate([self.train_XupX[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_Xup.shape[1])], 1)
             concat_arr = np.concatenate([print_ori, print_enc], 2)
             tiff.imwrite('out/epoch_{}.tif'.format(self.epoch), concat_arr)
-
-            if self.eval_loader is None:
-                self._log_preview_artifact(concat_arr, 'train')
 
         self.epoch += 1
 
