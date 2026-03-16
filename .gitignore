@@ -33,3 +33,5 @@ Untitled/
 notinuse/
 submodels/
 models/old/
+TensorBoardLogger_*/
+taming-transformers/
