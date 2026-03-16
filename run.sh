@@ -5,4 +5,4 @@ NO_ALBUMENTATIONS_UPDATE=1 python train.py --yaml aisr --prj default/max10skip4 
 # 8X enhancement with contrastive loss lbNCE=1
 NO_ALBUMENTATIONS_UPDATE=1 python train.py --yaml aisr --prj default/max10skip4 --env t09 --lbNCE 1
 ## Success 4x line
-NO_ALBUMENTATIONS_UPDATE=1 python train.py --yaml aisrtest --prj default/max10skip4 --env test --nocut --downbranch 2 ---cropz 32
+NO_ALBUMENTATIONS_UPDATE=1 python train.py --yaml aisrtest --prj default/max10skip4 --env test --nocut --downbranch 2 --cropz 32

@@ -13,6 +13,8 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger, MLFlowLogger
 from dataloader.data_multi import PairedImageDataset as Dataset
 from utils.get_args import get_args
+import socket
+import torch
 
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
 
@@ -110,10 +112,15 @@ if __name__ == '__main__':
         name='TensorBoardLogger',
         version=run_timestamp  # Use timestamp as version
     )
+    machine_id = socket.gethostname()
     mlf_logger = MLFlowLogger(
         experiment_name=args.dataset,
         run_name=f"{args.prj}_{run_timestamp}",  # Include timestamp in run name
-        tracking_uri=f"file:{os.path.join(log_base, 'MLFlowLogger')}"
+        tracking_uri=f"file:{os.path.join(log_base, 'MLFlowLogger')}",
+        tags={
+            "machine": machine_id,
+            "gpu": torch.cuda.get_device_name(0),
+        },
     )
 
     # Checkpoints - linked to same timestamp
