@@ -40,8 +40,8 @@ tensorboard --logdir /path/to/logs/TensorBoardLogger
 
 **MLflow:**
 ```bash
-mlflow ui --backend-store-uri /path/to/logs/MLFlowLogger --port 5000
-# Open: http://localhost:5000
+mlflow server --backend-store-uri /path/to/logs/MLFlowLogger --port 5002 --host 0.0.0.0
+# Open: http://localhost:5002
 ```
 
 ### Timestamp Versioning

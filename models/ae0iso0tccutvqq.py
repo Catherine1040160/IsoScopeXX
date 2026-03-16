@@ -400,16 +400,14 @@ class GAN(BaseModel):
 
     def validation_step(self, batch, batch_idx):
         if batch_idx == 0:
-            self.generation(batch, deterministic=True)  # Deterministic for validation
-            if self.epoch % 20 == 0:
-                # Debug: print filenames to see if this is validation data
-                # print(f"[VAL DEBUG] batch_idx={batch_idx}, filenames={batch.get('filenames', 'N/A')}")
+            self.generation(batch, deterministic=True)
+            if self.epoch % 20 == 0 and self.trainer.is_global_zero:
                 print_ori = np.concatenate([self.Xup[:, c, ::].squeeze().detach().cpu().numpy()
                                             for c in range(self.XupX.shape[1])], 1)
                 print_enc = np.concatenate([self.XupX[:, c, ::].squeeze().detach().cpu().numpy()
                                             for c in range(self.Xup.shape[1])], 1)
-                tiff.imwrite('out/val_epoch_{}.tif'.format(self.epoch),
-                             np.concatenate([print_ori, print_enc], 2))
+                val_concat = np.concatenate([print_ori, print_enc], 2)
+                tiff.imwrite('out/val_epoch_{}.tif'.format(self.epoch), val_concat)
         return None
     
     def configure_optimizers(self):

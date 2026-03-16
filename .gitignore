@@ -33,5 +33,9 @@ Untitled/
 notinuse/
 submodels/
 models/old/
+<<<<<<< HEAD
 TensorBoardLogger_*/
 taming-transformers/
+=======
+.ipynb_checkpoints/
+>>>>>>> feature/mlflow-tracking

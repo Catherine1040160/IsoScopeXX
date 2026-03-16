@@ -2,7 +2,7 @@ from __future__ import print_function
 import argparse
 import torch.nn as nn
 from torch.utils.data import DataLoader
-import os, shutil, time, sys
+import os, shutil, time, sys, subprocess
 from datetime import datetime
 from tqdm import tqdm
 from dotenv import load_dotenv
@@ -21,9 +21,9 @@ os.environ['OPENBLAS_NUM_THREADS'] = '1'
 
 def prepare_log(args):
     """
-    finalize arguments, creat a folder for logging, save argument in json
+    finalize arguments, create a folder for logging, save argument in json
     """
-    args.not_tracking_hparams = []  # 'mode', 'port', 'epoch_load', 'legacy', 'threads', 'test_batch_size']
+    args.not_tracking_hparams = ['mode', 'port', 'host', 'preload', 'test_batch_size']
     os.makedirs(os.environ.get('LOGS') + args.dataset + '/', exist_ok=True)
     os.makedirs(os.environ.get('LOGS') + args.dataset + '/' + args.prj + '/', exist_ok=True)
     save_json(args, os.environ.get('LOGS') + args.dataset + '/' + args.prj + '/' + '0.json')
@@ -69,6 +69,15 @@ if __name__ == '__main__':
 
     # Finalize Arguments and create files for logging
     args.bash = ' '.join(sys.argv)
+
+    def get_git_hash():
+        try:
+            return subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"]
+            ).decode().strip()
+        except Exception:
+            return "unknown"
+    args.git_hash = get_git_hash()
     args = prepare_log(args)
     print(args)
 
@@ -101,29 +110,28 @@ if __name__ == '__main__':
                 pass
         print('Preloading time: ' + str(time.time() - tini))
 
-    # Logger - Both TensorBoard and MLflow with timestamp versioning
     log_base = os.path.join(os.environ.get('LOGS'), args.dataset, args.prj, 'logs')
-
-    # Create unique timestamp for this run (links everything together)
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     tb_logger = TensorBoardLogger(
         save_dir=log_base,
         name='TensorBoardLogger',
-        version=run_timestamp  # Use timestamp as version
+        version=run_timestamp
     )
     machine_id = socket.gethostname()
     mlf_logger = MLFlowLogger(
-        experiment_name=args.dataset,
-        run_name=f"{args.prj}_{run_timestamp}",  # Include timestamp in run name
+        experiment_name=f"{args.dataset}_{args.env}",
+        run_name=f"{args.prj}_{run_timestamp}",
         tracking_uri=f"file:{os.path.join(log_base, 'MLFlowLogger')}",
         tags={
-            "machine": machine_id,
-            "gpu": torch.cuda.get_device_name(0),
-        },
+            'env': args.env,
+            'yaml_config': args.yaml,
+            'git_hash': args.git_hash,
+            'models': args.models,
+            'prj': args.prj,
+        }
     )
 
-    # Checkpoints - linked to same timestamp
     checkpoints = os.path.join(os.environ.get('LOGS'), args.dataset, args.prj, 'checkpoints', run_timestamp)
     os.makedirs(checkpoints, exist_ok=True)
 
@@ -131,8 +139,8 @@ if __name__ == '__main__':
 
     "Please use `Trainer(accelerator='gpu', devices=-1)` instead."
     trainer = pl.Trainer(gpus=-1, strategy='ddp_spawn',
-                         max_epochs=args.n_epochs,  # progress_bar_refresh_rate=20,
-                         logger=[tb_logger, mlf_logger],  # Both TensorBoard and MLflow
+                         max_epochs=args.n_epochs, # progress_bar_refresh_rate=20
+                         logger=[tb_logger, mlf_logger],
                          enable_checkpointing=True, log_every_n_steps=100,
                          check_val_every_n_epoch=1, accumulate_grad_batches=2)
     if eval_loader is not None:

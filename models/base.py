@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional, Union, Any
 
+import os
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,6 +10,7 @@ import yaml
 import torchvision.models as models
 import torchvision.transforms as transforms
 
+from pytorch_lightning.loggers import MLFlowLogger
 from networks.networks import get_scheduler
 from networks.loss import GANLoss
 from networks.registry import network_registry
@@ -92,9 +95,10 @@ class BaseModel(pl.LightningModule):
         self.loss_d_names = ['loss_d']
 
         # Process hyperparameters
-        hparams_dict = {x: vars(hparams)[x] for x in vars(hparams).keys() 
-                       if x not in hparams.not_tracking_hparams}
-        hparams_dict.pop('not_tracking_hparams', None)
+        hparams_dict = vars(hparams).copy()
+        for k in hparams.not_tracking_hparams:
+            hparams_dict.pop(k, None)
+        hparams_dict.pop("not_tracking_hparams", None)
         self.hparams.update(hparams_dict)
         self.save_hyperparameters(self.hparams)
 
@@ -113,6 +117,9 @@ class BaseModel(pl.LightningModule):
         self.log_image = {}
 
         self.buffer = {}
+        self._epoch_time_sum = 0.0
+        self._epoch_count = 0
+        os.makedirs('out', exist_ok=True)
 
     def _init_loss_functions(self) -> None:
         """Initialize loss functions used in the model.
@@ -124,8 +131,25 @@ class BaseModel(pl.LightningModule):
         else:
             self.criterionGAN = GANLoss(self.hparams.gan_mode)
 
-    #def update_optimizer_scheduler(self):
-    #    [self.optimizer_d, self.optimizer_g], [] = self.configure_optimizers()
+    def _get_mlflow_client_and_run_id(self):
+        """Gets the MLflow client and run ID for metric logging.
+
+        Only returns valid references on rank 0 to avoid duplicate logging in DDP.
+
+        Returns:
+            Tuple of (MlflowClient, run_id), or (None, None) if unavailable.
+        """
+        if not hasattr(self, 'trainer') or self.trainer is None:
+            return None, None
+        if not self.trainer.is_global_zero:
+            return None, None
+        for logger in self.loggers:
+            if isinstance(logger, MLFlowLogger):
+                client = logger.experiment
+                run_id = logger.run_id
+                if client is not None and run_id is not None:
+                    return client, run_id
+        return None, None
 
     def save_tensor_to_png(self, tensor, path):
         # Ensure the tensor is on CPU
@@ -228,7 +252,22 @@ class BaseModel(pl.LightningModule):
             else:
                 return None
 
+    def on_train_epoch_start(self):
+        """Records epoch start time for duration tracking."""
+        self._epoch_start_time = time.time()
+
     def training_epoch_end(self, outputs):
+        if hasattr(self, '_epoch_start_time'):
+            epoch_duration = time.time() - self._epoch_start_time
+            self._epoch_time_sum += epoch_duration
+            self._epoch_count += 1
+            avg = self._epoch_time_sum / self._epoch_count
+            if self.trainer.is_global_zero:
+                print(f'Epoch {self.epoch} | {epoch_duration//60:.0f}m {epoch_duration%60:.1f}s (avg: {avg//60:.0f}m {avg%60:.1f}s)')
+            client, run_id = self._get_mlflow_client_and_run_id()
+            if client is not None:
+                client.log_metric(run_id, 'epoch_time', epoch_duration, step=self.epoch)
+
         # checkpoint
         if self.epoch % self.hparams.epoch_save == 0:
             for name in self.netg_names.keys():
@@ -251,12 +290,12 @@ class BaseModel(pl.LightningModule):
 
         self.reset_metrics()
 
-        if self.epoch % 20 == 0 and hasattr(self, 'train_Xup') and hasattr(self, 'train_XupX'):
-            #  # (B, C, X, Y, Z) - Use stored training data (not validation data)
+        if self.epoch % 20 == 0 and hasattr(self, 'train_Xup') and hasattr(self, 'train_XupX') and self.trainer.is_global_zero:
+            # (B, C, X, Y, Z) - Use stored training data (not validation data)
             print_ori = np.concatenate([self.train_Xup[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_XupX.shape[1])], 1)
             print_enc = np.concatenate([self.train_XupX[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_Xup.shape[1])], 1)
-            tiff.imwrite('out/epoch_{}.tif'.format(self.epoch),
-                         np.concatenate([print_ori, print_enc], 2))
+            concat_arr = np.concatenate([print_ori, print_enc], 2)
+            tiff.imwrite('out/epoch_{}.tif'.format(self.epoch), concat_arr)
 
         self.epoch += 1
 
