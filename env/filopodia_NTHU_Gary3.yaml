@@ -2,6 +2,7 @@ train:
   ldmyaml: vqgan
   prj: null
   rotate: true
+  pixel_aug: true
   resize: 0
   nm: "00"
   gan_mode: vanilla
