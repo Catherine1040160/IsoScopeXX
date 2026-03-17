@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional, Union, Any
 
 import os
+import csv
 import time
 import torch
 import torch.nn as nn
@@ -123,8 +124,7 @@ class BaseModel(pl.LightningModule):
         os.makedirs('out', exist_ok=True)
 
     def _init_loss_functions(self) -> None:
-        """Initialize loss functions used in the model.
-        """
+        """Initialize loss functions."""
         self.criterionL1 = nn.L1Loss()
         self.criterionL2 = nn.MSELoss()
         if self.hparams.gan_mode == 'vanilla':
@@ -133,7 +133,7 @@ class BaseModel(pl.LightningModule):
             self.criterionGAN = GANLoss(self.hparams.gan_mode)
 
     def _get_mlflow_client_and_run_id(self):
-        """Gets the MLflow client and run ID for metric logging.
+        """Get the MLflow client and run ID.
 
         Only returns valid references on rank 0 to avoid duplicate logging in DDP.
 
