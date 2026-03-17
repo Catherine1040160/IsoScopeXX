@@ -8,6 +8,7 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 from utils.make_config import load_json, save_json
 import json
+import requests
 import yaml
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger, MLFlowLogger
@@ -112,8 +113,21 @@ if __name__ == '__main__':
                 pass
         print('Preloading time: ' + str(time.time() - tini))
 
-    log_base = os.path.join(os.environ.get('LOGS'), args.dataset, args.prj, 'logs')
-    run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Resolve MLflow tracking URI: CLI > env config > file-based fallback
+    file_tracking_uri = f"file:{os.path.join(log_base, 'MLFlowLogger')}"
+    http_uri = args.tracking_uri or configs.get('TRACKING_URI')
+
+    if http_uri:
+        try:
+            requests.get(f"{http_uri}/health", timeout=2)
+            tracking_uri = http_uri
+            print(f"MLflow: using server at {tracking_uri}")
+        except requests.RequestException:
+            tracking_uri = file_tracking_uri
+            print(f"MLflow: server {http_uri} not available, falling back to {tracking_uri}")
+    else:
+        tracking_uri = file_tracking_uri
+        print(f"MLflow: using file-based tracking at {tracking_uri}")
 
     tb_logger = TensorBoardLogger(
         save_dir=log_base,
@@ -123,7 +137,7 @@ if __name__ == '__main__':
     mlf_logger = MLFlowLogger(
         experiment_name=f"{args.dataset}_{args.env}",
         run_name=f"{args.prj}_{run_timestamp}",
-        tracking_uri=f"file:{os.path.join(log_base, 'MLFlowLogger')}",
+        tracking_uri=tracking_uri,
         tags={
             'env': args.env,
             'yaml_config': args.yaml,
