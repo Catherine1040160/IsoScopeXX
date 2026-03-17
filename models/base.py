@@ -10,6 +10,7 @@ import yaml
 import torchvision.models as models
 import torchvision.transforms as transforms
 
+from PIL import Image
 from pytorch_lightning.loggers import MLFlowLogger
 from networks.networks import get_scheduler
 from networks.loss import GANLoss
@@ -150,6 +151,53 @@ class BaseModel(pl.LightningModule):
                 if client is not None and run_id is not None:
                     return client, run_id
         return None, None
+
+    def on_fit_start(self):
+        """Log config.json to MLflow artifacts at the start of training."""
+        client, run_id = self._get_mlflow_client_and_run_id()
+        if client is None:
+            return
+        config_path = os.path.join(self.dir_checkpoints, 'config.json')
+        if os.path.exists(config_path):
+            client.log_artifact(run_id, config_path, artifact_path="config")
+
+    @staticmethod
+    def _save_3d_as_gif(arr, path, duration=100):
+        """Create an animated GIF from Z slices of a 3D array.
+
+        Args:
+            arr: 3D numpy array with shape (Z, H, W).
+            path: Output file path for the GIF.
+            duration: Duration per frame in milliseconds.
+        """
+        arr = arr.astype(np.float32)
+        mn, mx = arr.min(), arr.max()
+        if mx - mn > 1e-8:
+            arr = (arr - mn) / (mx - mn)
+        else:
+            arr = np.zeros_like(arr)
+        arr_uint8 = (arr * 255).astype(np.uint8)
+
+        frames = [Image.fromarray(arr_uint8[z]) for z in range(arr_uint8.shape[0])]
+
+        if frames:
+            frames[0].save(
+                path, save_all=True, append_images=frames[1:],
+                duration=duration, loop=0
+            )
+
+    def _log_gif_artifact(self, arr, prefix):
+        """Create a GIF from a 3D array and log to MLflow artifacts."""
+        client, run_id = self._get_mlflow_client_and_run_id()
+        if client is None:
+            return
+        gif_path = os.path.join(self.dir_checkpoints, f'{prefix}_epoch_{self.epoch}.gif')
+        try:
+            self._save_3d_as_gif(arr, gif_path)
+            client.log_artifact(run_id, gif_path, artifact_path="images")
+        finally:
+            if os.path.exists(gif_path):
+                os.remove(gif_path)
 
     def save_tensor_to_png(self, tensor, path):
         # Ensure the tensor is on CPU
@@ -296,6 +344,7 @@ class BaseModel(pl.LightningModule):
             print_enc = np.concatenate([self.train_XupX[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_Xup.shape[1])], 1)
             concat_arr = np.concatenate([print_ori, print_enc], 2)
             tiff.imwrite('out/epoch_{}.tif'.format(self.epoch), concat_arr)
+            self._log_gif_artifact(concat_arr, 'train')
 
         self.epoch += 1
 
