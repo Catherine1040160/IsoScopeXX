@@ -11,7 +11,7 @@ __pycache__/
 *.png
 TensorBoardLogger_*/
 taming-transformers/
-env/*.yamlø
+env/*.yaml
 
 
 # C extensions
