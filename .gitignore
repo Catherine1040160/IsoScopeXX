@@ -9,6 +9,8 @@ __pycache__/
 *.tif
 *.pth
 *.png
+TensorBoardLogger_*/
+taming-transformers/
 
 
 
