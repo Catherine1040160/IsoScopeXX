@@ -5,6 +5,8 @@ NO_ALBUMENTATIONS_UPDATE=1 python train.py --yaml aisr --prj default/max10skip4 
 # 8X enhancement with contrastive loss lbNCE=1
 NO_ALBUMENTATIONS_UPDATE=1 python train.py --yaml aisr --prj default/max10skip4 --env t09 --lbNCE 1
 
+# filopodia on GHCL03
+NO_ALBUMENTATIONS_UPDATE=1 python train.py --yaml filopodia_GHCL03 --prj default/max10skip4 --env GHCL03 --nocut --downbranch 2 --cropz 32
 
 # filopodia on GHCL01
 cd /home/aero/charliechang/projects/IsoScopeXX/
