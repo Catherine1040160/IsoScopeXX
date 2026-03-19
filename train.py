@@ -12,8 +12,6 @@ import requests
 import yaml
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger, MLFlowLogger
-from mlflow.tracking import MlflowClient
-from mlflow.exceptions import MlflowException
 from dataloader.data_multi import PairedImageDataset as Dataset
 from utils.get_args import get_args
 
@@ -134,20 +132,7 @@ if __name__ == '__main__':
         tracking_uri = file_tracking_uri
         print(f"MLflow: using file-based tracking at {tracking_uri}")
 
-    artifact_location = None
-    if tracking_uri.startswith("http"):
-        artifact_location = f"mlflow-artifacts:/{args.dataset}"
-        _client = MlflowClient(tracking_uri)
-        _existing = _client.get_experiment_by_name(args.dataset)
-        if _existing is not None:
-            loc = _existing.artifact_location or ""
-            if loc.startswith("file:") or loc.startswith("/"):
-                print(f"WARNING: Experiment '{args.dataset}' has local artifact_location: {loc}")
-                print(f"  Soft-deleting and recreating with artifact_location={artifact_location}")
-                try:
-                    _client.delete_experiment(_existing.experiment_id)
-                except MlflowException as e:
-                    print(f"WARNING: Failed to delete experiment: {e}")
+    artifact_location = f"mlflow-artifacts:/{args.dataset}" if tracking_uri.startswith("http") else None
 
     tb_logger = TensorBoardLogger(
         save_dir=log_base,

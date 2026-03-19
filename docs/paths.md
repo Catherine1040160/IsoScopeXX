@@ -29,7 +29,7 @@ $LOGS
     └── {prj}/
         ├── logs/
         │   ├── TensorBoardLogger/{run_timestamp}/
-        │   ├── MLFlowLogger/
+        │   ├── mlflow.db
         │   └── mlartifacts/
         └── checkpoints/
             └── {run_timestamp}/

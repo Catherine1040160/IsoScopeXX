@@ -86,9 +86,9 @@ Each run is tracked by **TensorBoard** and **MLflow** with a shared timestamp.
 # TensorBoard
 tensorboard --logdir /path/to/logs/TensorBoardLogger
 
-# MLflow (centralized server, all machines connect here)
+# MLflow
 mlflow server \
-  --backend-store-uri $LOGS/{dataset}/{prj}/logs/MLFlowLogger \
+  --backend-store-uri sqlite:////$LOGS/{dataset}/{prj}/logs/mlflow.db \
   --artifacts-destination $LOGS/{dataset}/{prj}/logs/mlartifacts \
   --host 0.0.0.0 --port 5002 \
   --disable-security-middleware
