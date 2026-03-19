@@ -24,8 +24,10 @@ def prepare_log(args, checkpoint_dir):
     os.makedirs(os.path.join(os.environ.get('LOGS'), args.dataset), exist_ok=True)
     os.makedirs(os.path.join(os.environ.get('LOGS'), args.dataset, args.prj), exist_ok=True)
     save_json(args, os.path.join(checkpoint_dir, 'config.json'))
-    shutil.copy('models/' + args.models + '.py',
+    shutil.copy(os.path.join('models', args.models + '.py'),
                 os.path.join(checkpoint_dir, args.models + '.py'))
+    shutil.copy(os.path.join('cfg', args.yaml + '.yaml'),
+                os.path.join(checkpoint_dir, args.yaml + '.yaml'))
     return args
 
 
@@ -36,7 +38,7 @@ if __name__ == '__main__':
     prelim_args = parser.parse_known_args()[0]
 
     # 2) Load YAML config early to obtain defaults (including models)
-    with open('env/' + prelim_args.yaml + '.yaml', 'rt') as f:
+    with open('cfg/' + prelim_args.yaml + '.yaml', 'rt') as f:
         json_args = argparse.Namespace()
         json_args.__dict__.update(yaml.safe_load(f)['train'])
 
@@ -53,16 +55,16 @@ if __name__ == '__main__':
     args = parser.parse_args(namespace=json_args)
 
     # environment file
-    with open('env/env', 'r') as f:
+    with open('cfg/env.json', 'r') as f:
         configs = json.load(f)[args.env]
 
     os.environ.setdefault('DATASET', configs['DATASET'])
     os.environ.setdefault('LOGS', configs['LOGS'])
 
     if args.env is not None:
-        load_dotenv('env/.' + args.env)
+        load_dotenv('cfg/.' + args.env)
     else:
-        load_dotenv('env/.t09')
+        load_dotenv('cfg/.t09')
 
     # Finalize Arguments and create files for logging
     args.bash = ' '.join(sys.argv)
@@ -85,7 +87,7 @@ if __name__ == '__main__':
     print(args)
 
     # Load Dataset and DataLoader
-    train_set = Dataset(root=os.environ.get('DATASET') + args.dataset + '/train/',
+    train_set = Dataset(root=os.path.join(os.environ.get('DATASET'), args.dataset, 'train'),
                         path=args.direction,
                         config=args, mode='train')#, index=None, filenames=True)
 
@@ -93,7 +95,7 @@ if __name__ == '__main__':
                               pin_memory=True, drop_last=True)
 
     try:
-        eval_set = Dataset(root=os.environ.get('DATASET') + args.dataset + '/val/',
+        eval_set = Dataset(root=os.path.join(os.environ.get('DATASET'), args.dataset, 'val'),
                            path=args.direction,
                            config=args, mode='test')#, index=None, filenames=True)
         eval_loader = DataLoader(dataset=eval_set, num_workers=1, batch_size=args.test_batch_size, shuffle=False,
@@ -135,7 +137,7 @@ if __name__ == '__main__':
         version=run_timestamp
     )
     mlf_logger = MLFlowLogger(
-        experiment_name=f"{args.dataset}_{args.env}",
+        experiment_name=f"{args.env}_{args.dataset}",
         run_name=f"{args.prj}_{run_timestamp}",
         tracking_uri=tracking_uri,
         tags={
