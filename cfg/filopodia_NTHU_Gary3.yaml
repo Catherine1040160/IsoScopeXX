@@ -46,5 +46,5 @@ train:
   tc: false
 
   # logging
-  prj: default/
+  prj: default
   not_tracking_hparams: []
