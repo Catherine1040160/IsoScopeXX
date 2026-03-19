@@ -13,6 +13,7 @@ import torchvision.transforms as transforms
 
 from PIL import Image
 from pytorch_lightning.loggers import MLFlowLogger
+from mlflow.exceptions import MlflowException
 from networks.networks import get_scheduler
 from networks.loss import GANLoss
 from networks.registry import network_registry
@@ -157,11 +158,13 @@ class BaseModel(pl.LightningModule):
         client, run_id = self._get_mlflow_client_and_run_id()
         if client is None:
             return
-        config_path = os.path.join(self.dir_checkpoints, 'config.json')
-        client.log_artifact(run_id, config_path, artifact_path="config")
-        yaml_path = os.path.join(self.dir_checkpoints, self.hparams.yaml + '.yaml')
-        if os.path.exists(yaml_path):
+        try:
+            config_path = os.path.join(self.dir_checkpoints, 'config.json')
+            client.log_artifact(run_id, config_path, artifact_path="config")
+            yaml_path = os.path.join(self.dir_checkpoints, self.hparams.yaml + '.yaml')
             client.log_artifact(run_id, yaml_path, artifact_path="config")
+        except (MlflowException, OSError) as e:
+            print(f"WARNING: Failed to log config artifacts to MLflow: {e}")
 
     @staticmethod
     def _save_3d_as_gif(arr, path, duration=100):
@@ -197,6 +200,8 @@ class BaseModel(pl.LightningModule):
         try:
             self._save_3d_as_gif(arr, gif_path)
             client.log_artifact(run_id, gif_path, artifact_path="images")
+        except (MlflowException, OSError) as e:
+            print(f"WARNING: Failed to log {prefix} GIF artifact to MLflow: {e}")
         finally:
             if os.path.exists(gif_path):
                 os.remove(gif_path)
