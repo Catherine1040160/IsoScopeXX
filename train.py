@@ -126,7 +126,8 @@ if __name__ == '__main__':
             print(f"MLflow: using server at {tracking_uri}")
         except requests.RequestException:
             tracking_uri = file_tracking_uri
-            print(f"MLflow: server {http_uri} not available, falling back to {tracking_uri}")
+            print(f"WARNING: MLflow server {http_uri} unreachable, "
+                  f"falling back to file-based: {tracking_uri}")
     else:
         tracking_uri = file_tracking_uri
         print(f"MLflow: using file-based tracking at {tracking_uri}")
@@ -137,7 +138,7 @@ if __name__ == '__main__':
         version=run_timestamp
     )
     mlf_logger = MLFlowLogger(
-        experiment_name=f"{args.env}_{args.dataset}",
+        experiment_name=args.dataset,
         run_name=f"{args.prj}_{run_timestamp}",
         tracking_uri=tracking_uri,
         tags={

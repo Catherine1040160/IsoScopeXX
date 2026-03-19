@@ -29,7 +29,8 @@ $LOGS
     └── {prj}/
         ├── logs/
         │   ├── TensorBoardLogger/{run_timestamp}/
-        │   └── MLFlowLogger/
+        │   ├── MLFlowLogger/
+        │   └── mlartifacts/
         └── checkpoints/
             └── {run_timestamp}/
                 ├── config.json
