@@ -89,7 +89,7 @@ tensorboard --logdir /path/to/logs/TensorBoardLogger
 # MLflow (centralized server, all machines connect here)
 mlflow server \
   --backend-store-uri $LOGS/{dataset}/{prj}/logs/MLFlowLogger \
-  --default-artifact-root $LOGS/{dataset}/{prj}/logs/mlartifacts \
+  --artifacts-destination $LOGS/{dataset}/{prj}/logs/mlartifacts \
   --host 0.0.0.0 --port 5002 \
   --disable-security-middleware
 ```
