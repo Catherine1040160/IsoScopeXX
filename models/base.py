@@ -121,6 +121,8 @@ class BaseModel(pl.LightningModule):
         self.buffer = {}
         self._epoch_time_sum = 0.0
         self._epoch_count = 0
+        self.best_val_loss = float('inf')
+        self.best_epoch = -1
         os.makedirs('out', exist_ok=True)
 
     def _init_loss_functions(self) -> None:
@@ -330,6 +332,9 @@ class BaseModel(pl.LightningModule):
             client, run_id = self._get_mlflow_client_and_run_id()
             if client is not None:
                 client.log_metric(run_id, 'epoch_time', epoch_duration, step=self.epoch)
+
+        self.log('lr_g', self.trainer.optimizers[0].param_groups[0]['lr'],
+                 on_step=False, on_epoch=True, logger=True, sync_dist=True)
 
         # checkpoint
         if self.epoch % self.hparams.epoch_save == 0:
