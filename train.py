@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from utils.make_config import load_json, save_json
 import json
 import requests
+from mlflow.system_metrics.system_metrics_monitor import SystemMetricsMonitor
 import yaml
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger, MLFlowLogger
@@ -88,9 +89,10 @@ if __name__ == '__main__':
             return "unknown"
     args.git_hash = get_git_hash()
 
-    log_base = os.path.join(os.environ.get('LOGS'), args.dataset, args.prj, 'logs')
+    logs_root = os.environ.get('LOGS')
+    log_base = os.path.join(logs_root, args.dataset, args.prj, 'logs')
     run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    checkpoints = os.path.join(os.environ.get('LOGS'), args.dataset, args.prj, 'checkpoints', run_timestamp)
+    checkpoints = os.path.join(logs_root, args.dataset, args.prj, 'checkpoints', run_timestamp)
     os.makedirs(checkpoints, exist_ok=True)
 
     args = prepare_log(args, checkpoints)
@@ -125,8 +127,8 @@ if __name__ == '__main__':
                 pass
         print('Preloading time: ' + str(time.time() - tini))
 
-    # Resolve MLflow tracking URI: CLI > env config > file-based fallback
-    file_tracking_uri = f"file:{os.path.join(log_base, 'MLFlowLogger')}"
+    # Resolve MLflow tracking URI: CLI > env config > local SQLite
+    mlflow_dir = os.path.join(logs_root, 'mlflow')
     http_uri = args.tracking_uri or configs.get('TRACKING_URI')
 
     if http_uri:
@@ -135,14 +137,15 @@ if __name__ == '__main__':
             tracking_uri = http_uri
             print(f"MLflow: using server at {tracking_uri}")
         except requests.RequestException:
-            tracking_uri = file_tracking_uri
-            print(f"WARNING: MLflow server {http_uri} unreachable, "
-                  f"falling back to file-based: {tracking_uri}")
+            raise RuntimeError(
+                f"MLflow server {http_uri} unreachable. "
+                "Start the server or remove TRACKING_URI from cfg/env.json to use local SQLite."
+            )
     else:
-        tracking_uri = file_tracking_uri
-        print(f"MLflow: using file-based tracking at {tracking_uri}")
-
-    artifact_location = f"mlflow-artifacts:/{args.dataset}" if tracking_uri.startswith("http") else None
+        os.makedirs(mlflow_dir, exist_ok=True)
+        local_db = os.path.join(mlflow_dir, 'mlflow.db')
+        tracking_uri = f"sqlite:///{local_db}"
+        print(f"MLflow: using local SQLite at {local_db}")
 
     tb_logger = TensorBoardLogger(
         save_dir=log_base,
@@ -151,9 +154,8 @@ if __name__ == '__main__':
     )
     mlf_logger = MLFlowLogger(
         experiment_name=args.dataset,
-        run_name=f"{args.prj}_{run_timestamp}",
+        run_name=run_timestamp,
         tracking_uri=tracking_uri,
-        artifact_location=artifact_location,
         tags={
             'env': args.env,
             'yaml_config': args.yaml,
@@ -165,13 +167,29 @@ if __name__ == '__main__':
 
     net = GAN(hparams=args, train_loader=train_loader, eval_loader=eval_loader, checkpoints=checkpoints)
 
+    # PL's MLFlowLogger bypasses mlflow.start_run(), so SystemMetricsMonitor must be started manually
+    monitor = None
+    if tracking_uri.startswith("http"):
+        monitor = SystemMetricsMonitor(mlf_logger.run_id, tracking_uri=tracking_uri)
+        monitor.start()
+
     "Please use `Trainer(accelerator='gpu', devices=-1)` instead."
     trainer = pl.Trainer(gpus=-1, strategy='ddp_spawn',
                          max_epochs=args.n_epochs, # progress_bar_refresh_rate=20
                          logger=[tb_logger, mlf_logger],
                          enable_checkpointing=True, log_every_n_steps=100,
                          check_val_every_n_epoch=1, accumulate_grad_batches=2)
-    if eval_loader is not None:
-        trainer.fit(net, train_loader, eval_loader)
-    else:
-        trainer.fit(net, train_loader)
+    try:
+        if eval_loader is not None:
+            trainer.fit(net, train_loader, eval_loader)
+        else:
+            trainer.fit(net, train_loader)
+    except Exception as e:
+        if 'mlflow' in str(e).lower():
+            print("\nERROR: MLflow Tracking Server disconnected during training.")
+            print("Checkpoints are saved up to the last epoch_save interval.")
+            print("TensorBoard logs are not affected.")
+        raise
+    finally:
+        if monitor is not None:
+            monitor.finish()

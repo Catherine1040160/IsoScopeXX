@@ -49,12 +49,10 @@ pip install -r requirements.txt
 
 Training is configured through two files in `cfg/`:
 
-- **`cfg/env.json`** — Per-machine paths (`DATASET`, `LOGS`, `TRACKING_URI`), keyed by environment name
-- **`cfg/{experiment}.yaml`** — Training hyperparameters (model, dataset, direction, learning rate, etc.)
+- **`cfg/env.json`**: per-machine paths `DATASET`, `LOGS`, `TRACKING_URI`, keyed by environment name
+- **`cfg/{experiment}.yaml`**: training hyperparameters such as model, dataset, direction, learning rate
 
 The `--yaml` flag selects which YAML config to use. See YAML files in `cfg/` for available options and parameters.
-
-For detailed path assembly logic, see [docs/paths.md](docs/paths.md).
 
 | Category | Parameter | Description |
 |----------|-----------|-------------|
@@ -82,19 +80,24 @@ For detailed path assembly logic, see [docs/paths.md](docs/paths.md).
 
 Each run is tracked by **TensorBoard** and **MLflow** with a shared timestamp.
 
+MLflow operates in two modes:
+
+- **Server mode**: when `TRACKING_URI` is set in `cfg/env.json`, training connects to an MLflow Tracking Server. The server must be reachable or training aborts.
+- **Local tracking**: when no `TRACKING_URI` is configured, MLflow logs to a local SQLite database at `${LOGS}/mlflow/mlflow.db`.
+
 ```bash
 # TensorBoard
-tensorboard --logdir /path/to/logs/TensorBoardLogger
+tensorboard --logdir /path/to/logs/{dataset}/{prj}/logs/TensorBoardLogger
 
-# MLflow — set these for your environment (see cfg/env.json for values):
-LOGS=/media/aero/HDD01/CharlieChang/logs
-DATASET=filopodia_9_R
-PRJ=default
+# MLflow Tracking Server
+LOGS=/path/to/logs
 
 mlflow server \
-  --backend-store-uri sqlite:///${LOGS}/${DATASET}/${PRJ}/logs/mlflow.db \
-  --artifacts-destination ${LOGS}/${DATASET}/${PRJ}/logs/mlartifacts \
+  --backend-store-uri sqlite:///${LOGS}/mlflow/mlflow.db \
+  --artifacts-destination ${LOGS}/mlflow/mlartifacts \
   --host 0.0.0.0 --port 5002
 ```
 
-MLflow tracking URI priority: CLI `--tracking_uri` > `cfg/env.json` > file-based fallback.
+Tracking URI priority: CLI `--tracking_uri` > `TRACKING_URI` in `cfg/env.json` > local SQLite.
+
+For detailed path assembly logic, see [docs/paths.md](docs/paths.md).

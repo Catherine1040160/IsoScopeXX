@@ -9,6 +9,8 @@ einops
 matplotlib
 mlflow
 numpy
+psutil
+nvidia-ml-py
 opencv-python
 pillow
 python-dotenv

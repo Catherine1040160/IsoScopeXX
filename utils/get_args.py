@@ -62,5 +62,5 @@ def get_args():
     parser.add_argument('--port', type=str, default='dummy')
     parser.add_argument('--host', type=str, default='dummy')
     parser.add_argument('--tracking_uri', type=str, default=None,
-                        help='MLflow tracking URI (http:// or file://). Overrides env config.')
+                        help='MLflow tracking URI (http:// or sqlite:///). Overrides env config.')
     return parser

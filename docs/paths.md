@@ -9,38 +9,37 @@ $DATASET
 └── {dataset}/
     ├── train/
     │   ├── {dir0}/
-    │   └── {dir1}/          (if paired)
+    │   └── {dir1}/
     └── val/
         ├── {dir0}/
         └── {dir1}/
 ```
 
 `direction` is split by `_` to support paired directories:
-- `x3d0` — single: `train/x3d0/`
-- `x3d0_x3d1` — paired: `train/x3d0/` + `train/x3d1/`
+- `x3d0`: single directory `train/x3d0/`
+- `x3d0_x3d1`: paired directories `train/x3d0/` + `train/x3d1/`
 
-Only `direction` uses `_` for splitting. Other parameters (`dataset`, `prj`, etc.) are used as-is.
+Only `direction` uses `_` for splitting. Other parameters like `dataset` and `prj` are used as-is.
 
 ## Log Paths (Output)
 
 ```
-$LOGS
+$LOGS/
+├── mlflow/
+│   └── mlflow.db
+│
 └── {dataset}/
     └── {prj}/
         ├── logs/
-        │   ├── TensorBoardLogger/{run_timestamp}/
-        │   ├── mlflow.db               (server mode only)
-        │   ├── mlartifacts/            (server mode only)
-        │   └── MLFlowLogger/           (file-based fallback only)
+        │   └── TensorBoardLogger/{run_timestamp}/
         └── checkpoints/
             └── {run_timestamp}/
                 ├── config.json
                 ├── {yaml_name}.yaml
                 ├── {models}.py
                 ├── {netg}_model_epoch_{N}.pth
-                └── {netd}_model_epoch_{N}.pth   (if save_d)
+                └── {netd}_model_epoch_{N}.pth
 ```
 
-`{run_timestamp}` = `YYYYMMDD_HHMMSS`, shared across TensorBoard, MLflow, and checkpoints.
+`{run_timestamp}` = `YYYYMMDD_HHMMSS`, shared across TensorBoard and checkpoints.
 
-**MLflow modes:** When an MLflow tracking server is running (see README), metadata is stored in `mlflow.db` (SQLite) and artifacts in `mlartifacts/`. When no server is available, MLflow falls back to file-based tracking under `MLFlowLogger/`.
