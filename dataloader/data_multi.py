@@ -64,7 +64,7 @@ def get_transforms(opt, additional_targets, need=('train', 'test')):
         ]
         if getattr(opt, 'pixel_aug', False):
             train_transforms.extend([
-                SafeRandomGamma(gamma_limit=(40, 160), p=0.5),
+                SafeRandomGamma(gamma_limit=(60, 140), p=0.5),
                 SafeRandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.2, p=0.5),
             ])
         train_transforms.append(ToTensorV2(p=1.0))
