@@ -214,19 +214,18 @@ class BaseModel(pl.LightningModule):
                 return None
 
         if optimizer_idx == 0:
-            if self.hparams.adv > 0:
-                self.generation(batch)  # why there are two generation?
-                loss_g = self.backward_g()
-                for k in list(loss_g.keys()):
-                    if k != 'sum':
-                        self.log(k, loss_g[k], on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
-                # Store training data for later saving (before validation overwrites)
-                if (self.epoch % 20 == 0) and hasattr(self, 'Xup') and hasattr(self, 'XupX'):
-                    self.train_Xup = self.Xup.detach().clone()
-                    self.train_XupX = self.XupX.detach().clone()
-                return loss_g['sum']
-            else:
-                return None
+            self.generation(batch)  # why there are two generation?
+            loss_g = self.backward_g()
+            for k in list(loss_g.keys()):
+                if k != 'sum':
+                    self.log(k, loss_g[k], on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            # Store training data for later saving (before validation overwrites)
+            if (self.epoch % 20 == 0) and hasattr(self, 'Xup') and hasattr(self, 'XupX'):
+                self.train_Xup = self.Xup.detach().clone()
+                self.train_XupX = self.XupX.detach().clone()
+                if hasattr(self, 'rawX') and self.rawX is not None:
+                    self.train_rawX = self.rawX.detach().clone()
+            return loss_g['sum']
 
     def training_epoch_end(self, outputs):
         # checkpoint
@@ -255,8 +254,11 @@ class BaseModel(pl.LightningModule):
             #  # (B, C, X, Y, Z) - Use stored training data (not validation data)
             print_ori = np.concatenate([self.train_Xup[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_XupX.shape[1])], 1)
             print_enc = np.concatenate([self.train_XupX[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_Xup.shape[1])], 1)
-            tiff.imwrite('out/epoch_{}.tif'.format(self.epoch),
-                         np.concatenate([print_ori, print_enc], 2))
+            to_print = np.concatenate([print_ori, print_enc], 2)
+            if self.rawX is not None:
+                print_raw = np.concatenate([self.rawX[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.rawX.shape[1])], 1)
+                to_print = np.concatenate([to_print, print_raw], 2)
+            tiff.imwrite('out/epoch_{}.tif'.format(self.epoch),to_print)
 
         self.epoch += 1
 

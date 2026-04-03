@@ -248,7 +248,7 @@ class GAN(BaseModel):
                                    b=self.oriX[:, :, :, :, ::self.hparams.skipl1])
 
         loss_dict['axx'] = axx
-        loss_g += axx
+        loss_g += axx * self.hparams.adv
         loss_dict['l1'] = loss_l1
         loss_g += loss_l1 * self.hparams.lamb
 
@@ -299,7 +299,7 @@ class GAN(BaseModel):
         dx = self.add_loss_adv(a=self.get_xy_plane(self.oriX), net_d=self.net_d, truth=True)
 
         loss_dict['dxx_x'] = dxx + dx
-        loss_d += dxx + dx
+        loss_d += (dxx + dx) * self.hparams.adv
 
         oriXpermute = self.oriX.permute(4, 1, 2, 3, 0)[:, :, :, :, 0]
         if self.hparams.tc:

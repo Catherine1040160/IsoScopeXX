@@ -288,13 +288,13 @@ class GAN(BaseModel):
         loss_dict['l1'] = loss_l1
         
         # Initialize total loss
-        loss_g = axx + loss_l1 * self.hparams.lamb
+        loss_g = axx * self.hparams.adv + loss_l1 * self.hparams.lamb
         
         # Cycle consistency losses
         if not self.hparams.nocyc:
             cycle_losses = self._compute_cycle_losses()
             loss_dict.update(cycle_losses)
-            loss_g += cycle_losses['gback'] + cycle_losses['l1b'] * self.hparams.lambB
+            loss_g += cycle_losses['gback'] * self.hparams.adv + cycle_losses['l1b'] * self.hparams.lambB
         
         # Contrastive losses
         if not self.hparams.nocut:
@@ -339,14 +339,14 @@ class GAN(BaseModel):
         loss_dict['dxx_x'] = dxx + dx
         
         # Initialize total loss
-        loss_d = dxx + dx
+        loss_d = (dxx + dx) * self.hparams.adv
 
         # Cycle discriminator losses
         if not self.hparams.nocyc:
             dyy = self.adv_loss_six_way_y(self.XupXback, truth=False)
             dy = self.adv_loss_six_way_y(self.oriX, truth=True)
             loss_dict['dyy'] = dyy + dy
-            loss_d += dyy + dy
+            loss_d += (dyy + dy) * self.hparams.adv
         
         loss_dict['sum'] = loss_d
         return loss_dict
