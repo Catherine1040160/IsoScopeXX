@@ -17,12 +17,13 @@ def read_2d_tif_to_3d(xlist):
     return x
 
 
-def tif_to_patches(npys, **kwargs):
+def tif_to_patches(npys, root='', **kwargs):
     """
     Convert a tif file to a folder of patches
 
     Args:
         npys: list of 3D numpy arrays to be converted to patches
+        root: base directory prepended to destination paths (default: '')
         destination: list of output folder names, one per input array (e.g., ['maskpatch/', 'oripatch/'])
         dh: tuple (dz, dx, dy) - patch dimensions in z, x, y (e.g., (64, 256, 256))
         step: tuple (sz, sx, sy) - step size for sliding window in z, x, y (e.g., (64, 256, 256))
@@ -42,7 +43,7 @@ def tif_to_patches(npys, **kwargs):
     (sz, sx, sy) = kwargs['step']
 
     for i in range(len(npys)):
-        os.makedirs(root + kwargs['destination'][i], exist_ok=True)
+        os.makedirs(os.path.join(root, kwargs['destination'][i]), exist_ok=True)
 
     for i in range(len(npys)):
         if kwargs['trd'][i] is not None:
@@ -81,8 +82,9 @@ def tif_to_patches(npys, **kwargs):
                                 volume = volumes[i].astype(np.float32)
                                 print(volume.shape)
                                 tiff.imwrite(
-                                    root + kwargs['destination'][i] + kwargs['prefix'] + str(x).zfill(3) + str(
-                                        y).zfill(3) + str(z).zfill(3) + '.tif', volume)
+                                    os.path.join(root, kwargs['destination'][i],
+                                                 kwargs['prefix'] + str(x).zfill(3) + str(y).zfill(3) + str(z).zfill(3) + '.tif'),
+                                    volume)
 
 
 def resampling(source, destination, scale=None, size=None):
@@ -123,7 +125,7 @@ if __name__ == "__main__":
     #               trd=((0, 255), (90, 360)), norm=('11', '11'),
     #               prefix='naivevmat1', ftr=-10, zrescale=None)
 
-    tif_to_patches([npy0],
+    tif_to_patches([npy0], root=root,
                    destination=['filopodia_patches_9_R/'],
                    dh=(64, 256, 256), step=(64, 256, 256), permute=None,
                    trd=(None, None), norm=('11', '11'),

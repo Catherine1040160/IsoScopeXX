@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional, Union, Any
 
+import os
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -8,6 +10,9 @@ import yaml
 import torchvision.models as models
 import torchvision.transforms as transforms
 
+from PIL import Image
+from pytorch_lightning.loggers import MLFlowLogger
+from mlflow.exceptions import MlflowException
 from networks.networks import get_scheduler
 from networks.loss import GANLoss
 from networks.registry import network_registry
@@ -92,9 +97,10 @@ class BaseModel(pl.LightningModule):
         self.loss_d_names = ['loss_d']
 
         # Process hyperparameters
-        hparams_dict = {x: vars(hparams)[x] for x in vars(hparams).keys() 
-                       if x not in hparams.not_tracking_hparams}
-        hparams_dict.pop('not_tracking_hparams', None)
+        hparams_dict = vars(hparams).copy()
+        for k in hparams.not_tracking_hparams:
+            hparams_dict.pop(k, None)
+        hparams_dict.pop("not_tracking_hparams", None)
         self.hparams.update(hparams_dict)
         self.save_hyperparameters(self.hparams)
 
@@ -113,10 +119,14 @@ class BaseModel(pl.LightningModule):
         self.log_image = {}
 
         self.buffer = {}
+        self._epoch_time_sum = 0.0
+        self._epoch_count = 0
+        self.best_val_loss = float('inf')
+        self.best_epoch = -1
+        os.makedirs('out', exist_ok=True)
 
     def _init_loss_functions(self) -> None:
-        """Initialize loss functions used in the model.
-        """
+        """Initialize loss functions."""
         self.criterionL1 = nn.L1Loss()
         self.criterionL2 = nn.MSELoss()
         if self.hparams.gan_mode == 'vanilla':
@@ -124,8 +134,87 @@ class BaseModel(pl.LightningModule):
         else:
             self.criterionGAN = GANLoss(self.hparams.gan_mode)
 
-    #def update_optimizer_scheduler(self):
-    #    [self.optimizer_d, self.optimizer_g], [] = self.configure_optimizers()
+    def _get_mlflow_client_and_run_id(self):
+        """Get the MLflow client and run ID.
+
+        Only returns valid references on rank 0 to avoid duplicate logging in DDP.
+
+        Returns:
+            Tuple of (MlflowClient, run_id), or (None, None) if unavailable.
+        """
+        if not hasattr(self, 'trainer') or self.trainer is None:
+            return None, None
+        if not self.trainer.is_global_zero:
+            return None, None
+        for logger in self.loggers:
+            if isinstance(logger, MLFlowLogger):
+                client = logger.experiment
+                run_id = logger.run_id
+                if client is not None and run_id is not None:
+                    return client, run_id
+        return None, None
+
+    def on_fit_start(self):
+        """Log config.json and YAML config to MLflow artifacts at the start of training."""
+        client, run_id = self._get_mlflow_client_and_run_id()
+        if client is None:
+            return
+        try:
+            config_path = os.path.join(self.dir_checkpoints, 'config.json')
+            client.log_artifact(run_id, config_path, artifact_path="config")
+            yaml_path = os.path.join(self.dir_checkpoints, self.hparams.yaml + '.yaml')
+            client.log_artifact(run_id, yaml_path, artifact_path="config")
+        except (MlflowException, OSError) as e:
+            print(f"WARNING: Failed to log config artifacts to MLflow: {e}")
+
+    @staticmethod
+    def _save_3d_as_gif(arr, path, duration=100):
+        """Create an animated GIF from Z slices of a 3D array.
+
+        Args:
+            arr: 3D numpy array with shape (Z, H, W).
+            path: Output file path for the GIF.
+            duration: Duration per frame in milliseconds.
+        """
+        if arr.ndim != 3:
+            print(f"WARNING: _save_3d_as_gif expected 3D array, got {arr.ndim}D — skipping")
+            return
+        arr = arr.astype(np.float32)
+        mn, mx = arr.min(), arr.max()
+        if mx - mn > 1e-8:
+            arr = (arr - mn) / (mx - mn)
+        else:
+            arr = np.zeros_like(arr)
+        arr_uint8 = (arr * 255).astype(np.uint8)
+
+        frames = [Image.fromarray(arr_uint8[z]) for z in range(arr_uint8.shape[0])]
+
+        if frames:
+            frames[0].save(
+                path, save_all=True, append_images=frames[1:],
+                duration=duration, loop=0
+            )
+
+    def _log_gif_artifact(self, arr, prefix):
+        """Create a GIF from a 3D array and log to MLflow artifacts.
+
+        Args:
+            arr: 3D numpy array with shape (Z, H, W).
+            prefix: Filename prefix (e.g. 'train'), used as ``{prefix}_epoch_{N}.gif``.
+        """
+        client, run_id = self._get_mlflow_client_and_run_id()
+        if client is None:
+            return
+        gif_path = os.path.join(self.dir_checkpoints, f'{prefix}_epoch_{self.epoch}.gif')
+        try:
+            self._save_3d_as_gif(arr, gif_path)
+            if os.path.exists(gif_path):
+                client.log_artifact(run_id, gif_path, artifact_path="images")
+        except (MlflowException, OSError) as e:
+            print(f"WARNING: Failed to log {prefix} GIF artifact to MLflow: {e}")
+        finally:
+            if os.path.exists(gif_path):
+                os.remove(gif_path)
 
     def save_tensor_to_png(self, tensor, path):
         # Ensure the tensor is on CPU
@@ -194,12 +283,12 @@ class BaseModel(pl.LightningModule):
         l1 = self.criterionL2(a, b)
         return l1
 
-    def save_auc_csv(self, auc, epoch):
-        auc = auc.cpu().numpy()
-        auc = np.insert(auc, 0, epoch)
-        with open(os.path.join(os.environ.get('LOGS'), self.hparams.prj, 'auc.csv'), 'a') as f:
-            writer = csv.writer(f)
-            writer.writerow(auc)
+    # def save_auc_csv(self, auc, epoch):
+    #     auc = auc.cpu().numpy()
+    #     auc = np.insert(auc, 0, epoch)
+    #     with open(os.path.join(os.environ.get('LOGS'), self.hparams.prj, 'auc.csv'), 'a') as f:
+    #         writer = csv.writer(f)
+    #         writer.writerow(auc)
 
     def training_step(self, batch, batch_idx, optimizer_idx):  ## THIS IS REQUIRED
         if optimizer_idx == 1:
@@ -227,17 +316,35 @@ class BaseModel(pl.LightningModule):
                     self.train_rawX = self.rawX.detach().clone()
             return loss_g['sum']
 
+    def on_train_epoch_start(self):
+        """Records epoch start time for duration tracking."""
+        self._epoch_start_time = time.time()
+
     def training_epoch_end(self, outputs):
+        if hasattr(self, '_epoch_start_time'):
+            epoch_duration = time.time() - self._epoch_start_time
+            self._epoch_time_sum += epoch_duration
+            self._epoch_count += 1
+            avg = self._epoch_time_sum / self._epoch_count
+            if self.trainer.is_global_zero:
+                print(f'Epoch {self.epoch} | {epoch_duration//60:.0f}m {epoch_duration%60:.1f}s (avg: {avg//60:.0f}m {avg%60:.1f}s)')
+            client, run_id = self._get_mlflow_client_and_run_id()
+            if client is not None:
+                client.log_metric(run_id, 'epoch_time', epoch_duration, step=self.epoch)
+
+        self.log('lr_g', self.trainer.optimizers[0].param_groups[0]['lr'],
+                 on_step=False, on_epoch=True, logger=True, sync_dist=True)
+
         # checkpoint
         if self.epoch % self.hparams.epoch_save == 0:
             for name in self.netg_names.keys():
-                path_g = self.dir_checkpoints + ('/' + self.netg_names[name] + '_model_epoch_{}.pth').format(self.epoch)
+                path_g = os.path.join(self.dir_checkpoints, '{}_model_epoch_{}.pth'.format(self.netg_names[name], self.epoch))
                 torch.save(getattr(self, name), path_g)
                 print("Checkpoint saved to {}".format(path_g))
 
             if self.hparams.save_d:
                 for name in self.netd_names.keys():
-                    path_d = self.dir_checkpoints + ('/' + self.netd_names[name] + '_model_epoch_{}.pth').format(self.epoch)
+                    path_d = os.path.join(self.dir_checkpoints, '{}_model_epoch_{}.pth'.format(self.netd_names[name], self.epoch))
                     torch.save(getattr(self, name), path_d)
                     print("Checkpoint saved to {}".format(path_d))
 
@@ -246,19 +353,17 @@ class BaseModel(pl.LightningModule):
 
         # log saved images
         for k in self.log_image.keys():
-            self.save_tensor_to_png(self.log_image[k], self.dir_checkpoints + os.path.join(str(self.epoch).zfill(4) + k + '.png'))
+            self.save_tensor_to_png(self.log_image[k], os.path.join(self.dir_checkpoints, str(self.epoch).zfill(4) + k + '.png'))
 
         self.reset_metrics()
 
-        if self.epoch % 20 == 0 and hasattr(self, 'train_Xup') and hasattr(self, 'train_XupX'):
-            #  # (B, C, X, Y, Z) - Use stored training data (not validation data)
+        if self.epoch % 20 == 0 and hasattr(self, 'train_Xup') and hasattr(self, 'train_XupX') and self.trainer.is_global_zero:
+            # (B, C, X, Y, Z) - Use stored training data (not validation data)
             print_ori = np.concatenate([self.train_Xup[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_XupX.shape[1])], 1)
             print_enc = np.concatenate([self.train_XupX[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_Xup.shape[1])], 1)
-            to_print = np.concatenate([print_ori, print_enc], 2)
-            if self.rawX is not None:
-                print_raw = np.concatenate([self.rawX[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.rawX.shape[1])], 1)
-                to_print = np.concatenate([to_print, print_raw], 2)
-            tiff.imwrite('out/epoch_{}.tif'.format(self.epoch),to_print)
+            concat_arr = np.concatenate([print_ori, print_enc], 2)
+            tiff.imwrite('out/train_epoch_{}.tif'.format(self.epoch), concat_arr)
+            self._log_gif_artifact(concat_arr, 'train')
 
         self.epoch += 1
 

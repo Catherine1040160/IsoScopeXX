@@ -201,7 +201,7 @@ if __name__ == '__main__':
     from dotenv import load_dotenv
     import argparse
     import matplotlib.pyplot as plt
-    load_dotenv('env/.t09')
+    load_dotenv('cfg/.t09')
 
     parser = argparse.ArgumentParser(description='Visualize paired image dataset')
     parser.add_argument('--dataset', type=str, default='womac4', help='Dataset to use (womac4, dess0, brain)')
