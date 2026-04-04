@@ -339,32 +339,6 @@ class GAN(BaseModel):
         if self.use_ema:
             self.model_ema(self)
 
-    def validation_step(self, batch, batch_idx):
-        if batch_idx == 0:
-            self.generation(batch, deterministic=True)
-
-            val_l1 = self.add_loss_l1(self.XupX, self.Xup)
-            self.log('val_l1', val_l1, on_step=False, on_epoch=True, logger=True, sync_dist=True)
-            self.log('val_vq', self.qloss, on_step=False, on_epoch=True, logger=True, sync_dist=True)
-
-            if val_l1 < self.best_val_loss:
-                self.best_val_loss = val_l1.item()
-                self.best_epoch = self.epoch
-                client, run_id = self._get_mlflow_client_and_run_id()
-                if client is not None:
-                    client.log_metric(run_id, 'best_val_l1', self.best_val_loss, step=self.epoch)
-                    client.log_metric(run_id, 'best_epoch', self.best_epoch, step=self.epoch)
-
-            if self.epoch % 20 == 0 and self.trainer.is_global_zero:
-                print_ori = np.concatenate([self.Xup[:, c, ::].squeeze().detach().cpu().numpy()
-                                            for c in range(self.XupX.shape[1])], 1)
-                print_enc = np.concatenate([self.XupX[:, c, ::].squeeze().detach().cpu().numpy()
-                                            for c in range(self.Xup.shape[1])], 1)
-                val_concat = np.concatenate([print_ori, print_enc], 2)
-                tiff.imwrite('out/val_epoch_{}.tif'.format(self.epoch), val_concat)
-                self._log_gif_artifact(val_concat, 'val')
-        return None
-
     def configure_optimizers(self):
         lr_d = self.hparams.lr
         lr_g = getattr(self.hparams, 'lr_g_factor', 1.0) * self.hparams.lr

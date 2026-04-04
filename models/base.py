@@ -8,9 +8,6 @@ import torch.optim as optim
 import pytorch_lightning as pl
 import yaml
 import torchvision.models as models
-import torchvision.transforms as transforms
-
-from PIL import Image
 from pytorch_lightning.loggers import MLFlowLogger
 from mlflow.exceptions import MlflowException
 from taming.modules.losses.lpips import LPIPS
@@ -117,8 +114,6 @@ class BaseModel(pl.LightningModule):
         self.all_out = []
         self.all_loss = []
 
-        self.log_image = {}
-
         self.buffer = {}
         self._epoch_time_sum = 0.0
         self._epoch_count = 0
@@ -219,30 +214,6 @@ class BaseModel(pl.LightningModule):
         finally:
             if os.path.exists(gif_path):
                 os.remove(gif_path)
-
-    def save_tensor_to_png(self, tensor, path):
-        # Ensure the tensor is on CPU
-        tensor = tensor.detach().cpu()
-
-        # If the tensor is 2D, convert it to 3D
-        if tensor.dim() == 2:
-            tensor = tensor.unsqueeze(0)
-
-        # Ensure the tensor has 3 dimensions
-        assert tensor.dim() == 3, "Tensor should have 3 dimensions: (C, H, W)"
-
-        # Normalize the tensor if it's not in [0, 1] range
-        if tensor.min() < 0 or tensor.max() > 1:
-            tensor = (tensor - tensor.min()) / (tensor.max() - tensor.min())
-
-        # Convert to PIL Image
-        if tensor.shape[0] == 1:  # Grayscale
-            img = transforms.ToPILImage()(tensor.squeeze())
-        else:  # RGB
-            img = transforms.ToPILImage()(tensor)
-
-        # Save the image
-        img.save(path)
 
     def configure_optimizers(self):  ## THIS IS REQUIRED
         print('configuring optimizer being called....')
@@ -355,10 +326,6 @@ class BaseModel(pl.LightningModule):
         self.net_g_scheduler.step()
         self.net_d_scheduler.step()
 
-        # log saved images
-        for k in self.log_image.keys():
-            self.save_tensor_to_png(self.log_image[k], os.path.join(self.dir_checkpoints, str(self.epoch).zfill(4) + k + '.png'))
-
         self.reset_metrics()
 
         if self.epoch % 5 == 0 and hasattr(self, 'train_Xup') and hasattr(self, 'train_XupX') and self.trainer.is_global_zero:
@@ -368,26 +335,6 @@ class BaseModel(pl.LightningModule):
             concat_arr = np.concatenate([print_ori, print_enc], 2)
             self._log_gif_artifact(concat_arr, 'train')
 
-            def to_rgb(t):
-                return t.repeat(1, 3, 1, 1) if t.shape[1] == 1 else t
-
-            with torch.no_grad():
-                B, C, X, Y, Z = self.train_XupX.shape
-                print(self.train_Xup.shape)
-                # XY view: all Z-slices → (B*Z, C, X, Y)
-                xy_tgt  = self.train_Xup.permute(0, 4, 1, 2, 3).reshape(B * Z, C, X, Y)[::16, ::]
-                # YZ view: all X-slices → (B*X, C, Y, Z)  [requires X==Z for LPIPS batch match]
-                yz_tgt  = self.train_Xup.permute(0, 2, 1, 3, 4).reshape(B * X, C, Y, Z)[::16, ::]
-                yz_pred = self.train_XupX.permute(0, 2, 1, 3, 4).reshape(B * X, C, Y, Z)[::16, ::]
-                # lpips_tgt: XY vs YZ of ground truth (baseline anisotropy)
-                # lpips_pred: XY of target vs YZ of prediction (isotropy of output)
-                lpips_tgt  = self.lpips_fn(to_rgb(xy_tgt), to_rgb(yz_tgt)).mean()
-                lpips_pred = self.lpips_fn(to_rgb(xy_tgt), to_rgb(yz_pred)).mean()
-
-            # sync_dist=False: values only exist on rank 0, no all-reduce needed
-            self.log('train_lpips_tgt', lpips_tgt, on_step=False, on_epoch=True, logger=True, sync_dist=False)
-            self.log('train_lpips_pred', lpips_pred, on_step=False, on_epoch=True, logger=True, sync_dist=False)
-
         self.epoch += 1
 
     def get_metrics(self):
@@ -395,6 +342,38 @@ class BaseModel(pl.LightningModule):
 
     def reset_metrics(self):
         pass
+
+    def validation_step(self, batch, batch_idx):
+        if not hasattr(self, 'generation'):
+            return None
+        self.generation(batch)
+        if not (hasattr(self, 'Xup') and hasattr(self, 'XupX')):
+            return None
+
+        # Store first batch for artifact logging (rank 0 only)
+        if batch_idx == 0 and self.trainer.is_global_zero:
+            self.val_Xup = self.Xup.detach().clone()
+            self.val_XupX = self.XupX.detach().clone()
+
+        def to_rgb(t):
+            return t.repeat(1, 3, 1, 1) if t.shape[1] == 1 else t
+
+        with torch.no_grad():
+            B, C, X, Y, Z = self.XupX.shape
+            # XY view: all Z-slices → (B*Z, C, X, Y)
+            xy_tgt  = self.Xup.permute(0, 4, 1, 2, 3).reshape(B * Z, C, X, Y)[::16]
+            # YZ view: all X-slices → (B*X, C, Y, Z)  [requires X==Z for LPIPS batch match]
+            yz_tgt  = self.Xup.permute(0, 2, 1, 3, 4).reshape(B * X, C, Y, Z)[::16]
+            yz_pred = self.XupX.permute(0, 2, 1, 3, 4).reshape(B * X, C, Y, Z)[::16]
+            # lpips_tgt: XY vs YZ of ground truth (baseline anisotropy)
+            # lpips_pred: XY of target vs YZ of prediction (isotropy of output)
+            lpips_tgt  = self.lpips_fn(to_rgb(xy_tgt), to_rgb(yz_tgt)).mean()
+            lpips_pred = self.lpips_fn(to_rgb(xy_tgt), to_rgb(yz_pred)).mean()
+
+        # on_epoch=True: PL averages across all batches and ranks automatically
+        self.log('val_lpips_tgt', lpips_tgt, on_step=False, on_epoch=True, logger=True, sync_dist=True)
+        self.log('val_lpips_pred', lpips_pred, on_step=False, on_epoch=True, logger=True, sync_dist=True)
+        return None
 
     def testing_step(self, batch, batch_idx):
         self.generation(batch)
