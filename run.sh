@@ -14,3 +14,8 @@ NO_ALBUMENTATIONS_UPDATE=1 python train.py --yaml filopodia_GHCL03 --prj default
 
 # filopodia on NTHU_Gary3
 NO_ALBUMENTATIONS_UPDATE=1 python train.py --yaml filopodia_NTHU_Gary3 --env NTHU_Gary3 --nocut --downbranch 2 --cropz 32
+
+# mlflow ui --backend-store-uri "sqlite:////home/gary/workspace/logs/THX10SDM20xw/mlflow/mlflow.db" --port 5002  
+
+# with mlflow
+NO_ALBUMENTATIONS_UPDATE=1 python train.py --yaml aisr --prj vqcleanM0/max5skip4 --env brcb --dataset THX10SDM20xw --direction roiAdsp4 --lamb 5 --models vqcleanM0 --tracking_uri sqlite://///home/gary/workspace/logs/THX10SDM20xw/mlflow.db

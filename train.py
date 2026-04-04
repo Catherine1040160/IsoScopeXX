@@ -131,7 +131,7 @@ if __name__ == '__main__':
     mlflow_dir = os.path.join(logs_root, 'mlflow')
     http_uri = args.tracking_uri or configs.get('TRACKING_URI')
 
-    if http_uri:
+    if http_uri and http_uri.startswith("http"):
         try:
             requests.get(f"{http_uri}/health", timeout=2)
             tracking_uri = http_uri
@@ -141,6 +141,9 @@ if __name__ == '__main__':
                 f"MLflow server {http_uri} unreachable. "
                 "Start the server or remove TRACKING_URI from cfg/env.json to use local SQLite."
             )
+    elif http_uri:
+        tracking_uri = http_uri
+        print(f"MLflow: using URI at {tracking_uri}")
     else:
         os.makedirs(mlflow_dir, exist_ok=True)
         local_db = os.path.join(mlflow_dir, 'mlflow.db')

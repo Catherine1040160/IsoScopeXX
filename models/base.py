@@ -13,6 +13,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 from pytorch_lightning.loggers import MLFlowLogger
 from mlflow.exceptions import MlflowException
+from taming.modules.losses.lpips import LPIPS
 from networks.networks import get_scheduler
 from networks.loss import GANLoss
 from networks.registry import network_registry
@@ -133,6 +134,9 @@ class BaseModel(pl.LightningModule):
             self.criterionGAN = nn.BCEWithLogitsLoss()
         else:
             self.criterionGAN = GANLoss(self.hparams.gan_mode)
+        self.lpips_fn = LPIPS().eval()
+        for p in self.lpips_fn.parameters():
+            p.requires_grad = False
 
     def _get_mlflow_client_and_run_id(self):
         """Get the MLflow client and run ID.
@@ -335,8 +339,8 @@ class BaseModel(pl.LightningModule):
         self.log('lr_g', self.trainer.optimizers[0].param_groups[0]['lr'],
                  on_step=False, on_epoch=True, logger=True, sync_dist=True)
 
-        # checkpoint
-        if self.epoch % self.hparams.epoch_save == 0:
+        # checkpoint — rank 0 only to avoid duplicate writes
+        if self.epoch % self.hparams.epoch_save == 0 and self.trainer.is_global_zero:
             for name in self.netg_names.keys():
                 path_g = os.path.join(self.dir_checkpoints, '{}_model_epoch_{}.pth'.format(self.netg_names[name], self.epoch))
                 torch.save(getattr(self, name), path_g)
@@ -357,13 +361,32 @@ class BaseModel(pl.LightningModule):
 
         self.reset_metrics()
 
-        if self.epoch % 20 == 0 and hasattr(self, 'train_Xup') and hasattr(self, 'train_XupX') and self.trainer.is_global_zero:
+        if self.epoch % 5 == 0 and hasattr(self, 'train_Xup') and hasattr(self, 'train_XupX') and self.trainer.is_global_zero:
             # (B, C, X, Y, Z) - Use stored training data (not validation data)
             print_ori = np.concatenate([self.train_Xup[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_XupX.shape[1])], 1)
             print_enc = np.concatenate([self.train_XupX[:, c, ::].squeeze().detach().cpu().numpy() for c in range(self.train_Xup.shape[1])], 1)
             concat_arr = np.concatenate([print_ori, print_enc], 2)
-            tiff.imwrite('out/train_epoch_{}.tif'.format(self.epoch), concat_arr)
             self._log_gif_artifact(concat_arr, 'train')
+
+            def to_rgb(t):
+                return t.repeat(1, 3, 1, 1) if t.shape[1] == 1 else t
+
+            with torch.no_grad():
+                B, C, X, Y, Z = self.train_XupX.shape
+                print(self.train_Xup.shape)
+                # XY view: all Z-slices → (B*Z, C, X, Y)
+                xy_tgt  = self.train_Xup.permute(0, 4, 1, 2, 3).reshape(B * Z, C, X, Y)[::16, ::]
+                # YZ view: all X-slices → (B*X, C, Y, Z)  [requires X==Z for LPIPS batch match]
+                yz_tgt  = self.train_Xup.permute(0, 2, 1, 3, 4).reshape(B * X, C, Y, Z)[::16, ::]
+                yz_pred = self.train_XupX.permute(0, 2, 1, 3, 4).reshape(B * X, C, Y, Z)[::16, ::]
+                # lpips_tgt: XY vs YZ of ground truth (baseline anisotropy)
+                # lpips_pred: XY of target vs YZ of prediction (isotropy of output)
+                lpips_tgt  = self.lpips_fn(to_rgb(xy_tgt), to_rgb(yz_tgt)).mean()
+                lpips_pred = self.lpips_fn(to_rgb(xy_tgt), to_rgb(yz_pred)).mean()
+
+            # sync_dist=False: values only exist on rank 0, no all-reduce needed
+            self.log('train_lpips_tgt', lpips_tgt, on_step=False, on_epoch=True, logger=True, sync_dist=False)
+            self.log('train_lpips_pred', lpips_pred, on_step=False, on_epoch=True, logger=True, sync_dist=False)
 
         self.epoch += 1
 
